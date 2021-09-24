@@ -1,0 +1,108 @@
+---
+title: "Alpraz Group Surface Mask"
+author: "Valerie Jill Sydnor"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ciftiTools)
+library(catch22)
+library(rgl)
+ciftiTools.setOption('wb_path', '/Users/valeriesydnor/Software/workbench/')
+rgl::setupKnitr()
+```
+
+**FUNCTIONS**
+
+```{r}
+alpraz_cifti_mask_left <- function(subid, sesid){
+  
+  #load in the catch22 output
+  cifti.path = sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/%1$s/%2$s/%1$s_%2$s_catch22_tsfeatures.dscalar.nii", subid, sesid)
+  xii <- read_xifti(cifti.path)
+  
+  #identify LH vertices with null/present data and save in a binary 0/1 subject-specific mask 
+  leftcortex.mask <- as.numeric(apply(xii$data$cortex_left, 1, function(x) sum(x)) != 0)
+
+  rm(xii)
+  
+  return(leftcortex.mask)
+}
+```
+
+```{r}
+alpraz_cifti_mask_right <- function(subid, sesid){
+  
+  #load in the catch22 output
+  cifti.path = sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/%1$s/%2$s/%1$s_%2$s_catch22_tsfeatures.dscalar.nii", subid, sesid)
+  xii <- read_xifti(cifti.path)
+  
+  #identify LH vertices with null/present data and save in a binary 0/1 subject-specific mask 
+  rightcortex.mask <- as.numeric(apply(xii$data$cortex_right, 1, function(x) sum(x)) != 0)
+
+  rm(xii)
+  
+  return(rightcortex.mask)
+}
+```
+
+```{r}
+mask_catch22_data <- function(subid, sesid){
+  
+  #load in the catch22 output
+  cifti.path = sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/%1$s/%2$s/%1$s_%2$s_catch22_tsfeatures.dscalar.nii", subid, sesid)
+  xii <- read_xifti(cifti.path)
+  
+  #mask it
+  catch22.Lcortex.masked <- sweep(xii$data$cortex_left, MARGIN = 1, xii.mask$data$cortex_left, `*`)  
+  catch22.Rcortex.masked <- sweep(xii$data$cortex_right, MARGIN = 1, xii.mask$data$cortex_right, `*`)  
+  
+  xii.catch22.masked <- as_xifti(cortexL = catch22.Lcortex.masked, cortexR = catch22.Rcortex.masked)
+  write_xifti(xii.catch22.masked, file.path(sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/%1$s/%2$s/%1$s_%2$s_catch22_tsfeatures_masked.dscalar.nii", subid, sesid)))
+  
+  rm(xii)
+}
+```
+
+**PARTICIPANT LIST**
+
+```{r}
+participants <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/sub_ses_passQC_finallist.csv", header = FALSE)
+```
+
+**COMPUTE GROUP CORTEX MASK**
+
+```{r}
+leftcortex.groupmask.matrix <- matrix(NA, ncol=84, nrow=29696)
+rightcortex.groupmask.matrix <- matrix(NA, ncol=84, nrow=29716)
+```
+
+```{r}
+for(row in c(1:nrow(participants))){
+  subid=participants[row,1]
+  sesid=participants[row,2]
+    columnnum <- as.numeric(sprintf("%s", row))
+    leftcortex.groupmask.matrix[,columnnum] <- alpraz_cifti_mask_left(subid, sesid)
+    rightcortex.groupmask.matrix[,columnnum] <- alpraz_cifti_mask_right(subid, sesid)
+}
+```
+
+```{r}
+leftcortex.groupmask <- as.numeric(apply(leftcortex.groupmask.matrix, 1, function(x) sum(x)) == 84) 
+rightcortex.groupmask <- as.numeric(apply(rightcortex.groupmask.matrix, 1, function(x) sum(x)) == 84) 
+
+xii.mask <- as_xifti(cortexL = leftcortex.groupmask, cortexR = rightcortex.groupmask)
+write_xifti(xii.mask, file.path("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/group_cortex_mask.dscalar.nii"))
+```
+
+**MASK PARTICIPANT CATCH22 CIFTIS**
+
+```{r}
+for(row in c(1:nrow(participants))){
+  subid=participants[row,1]
+  sesid=participants[row,2]
+  mask_catch22_data(subid, sesid)
+}
+```
+
+

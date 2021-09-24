@@ -1,0 +1,80 @@
+---
+title: "Alpraz Catch22 Group Maps: Quantify"
+author: "Valerie Jill Sydnor"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ciftiTools)
+library(catch22)
+library(rgl)
+ciftiTools.setOption('wb_path', '/Users/valeriesydnor/Software/workbench/')
+rgl::setupKnitr()
+```
+
+**PARTICIPANT LIST**
+
+```{r}
+participants <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/sub_ses_passQC_finallist.csv", header = FALSE)
+```
+
+**GENERATE GROUP AVERAGE CATCH 22 MAPS**
+
+```{r}
+for(row in c(1:nrow(participants))){
+  subid=participants[row,1]
+  sesid=participants[row,2]
+  leftmatrix_name <- sprintf("Mleft%s", row)
+  rightmatrix_name <- sprintf("Mright%s", row)
+  cifti.path = sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/%1$s/%2$s/%1$s_%2$s_catch22_tsfeatures_masked.dscalar.nii", subid, sesid)
+  xii <- read_xifti(cifti.path)
+  leftmatrix_name <- assign(leftmatrix_name, xii$data$cortex_left)
+  rightmatrix_name <- assign(rightmatrix_name, xii$data$cortex_right)
+  rm(xii)
+}
+```
+
+```{r}
+matrix.list.left <- list(Mleft1, Mleft2, Mleft3, Mleft4, Mleft5, Mleft6, Mleft7, Mleft8, Mleft9, Mleft10,
+                         Mleft11, Mleft12, Mleft13, Mleft14, Mleft15, Mleft16, Mleft17, Mleft18, Mleft19, Mleft20,
+                         Mleft21, Mleft22, Mleft23, Mleft24, Mleft25, Mleft26, Mleft27, Mleft28, Mleft29, Mleft30,
+                         Mleft31, Mleft32, Mleft33, Mleft34, Mleft35, Mleft36, Mleft37, Mleft38, Mleft39, Mleft40,
+                         Mleft41, Mleft42, Mleft43, Mleft44, Mleft45, Mleft46, Mleft47, Mleft48, Mleft49, Mleft50,
+                         Mleft51, Mleft52, Mleft53, Mleft54, Mleft55, Mleft56, Mleft57, Mleft58, Mleft59, Mleft60,
+                         Mleft61, Mleft62, Mleft63, Mleft64, Mleft65, Mleft66, Mleft67, Mleft68, Mleft69, Mleft70,
+                         Mleft71, Mleft72, Mleft73, Mleft74, Mleft75, Mleft76, Mleft77, Mleft78, Mleft79, Mleft80,
+                         Mleft81, Mleft82, Mleft83, Mleft84)
+
+leftcortex.group.catch22 <- Reduce("+", matrix.list.left)/length(matrix.list.left)
+```
+
+```{r}
+matrix.list.right <- list(Mright1, Mright2, Mright3, Mright4, Mright5, Mright6, Mright7, Mright8, Mright9, Mright10,
+                         Mright11, Mright12, Mright13, Mright14, Mright15, Mright16, Mright17, Mright18, Mright19, Mright20,
+                         Mright21, Mright22, Mright23, Mright24, Mright25, Mright26, Mright27, Mright28, Mright29, Mright30,
+                         Mright31, Mright32, Mright33, Mright34, Mright35, Mright36, Mright37, Mright38, Mright39, Mright40,
+                         Mright41, Mright42, Mright43, Mright44, Mright45, Mright46, Mright47, Mright48, Mright49, Mright50,
+                         Mright51, Mright52, Mright53, Mright54, Mright55, Mright56, Mright57, Mright58, Mright59, Mright60,
+                         Mright61, Mright62, Mright63, Mright64, Mright65, Mright66, Mright67, Mright68, Mright69, Mright70,
+                         Mright71, Mright72, Mright73, Mright74, Mright75, Mright76, Mright77, Mright78, Mright79, Mright80,
+                         Mright81, Mright82, Mright83, Mright84)
+
+rightcortex.group.catch22 <- Reduce("+", matrix.list.right)/length(matrix.list.right)
+```
+
+```{r}
+xii.catch22.average.maps <- as_xifti(cortexL = leftcortex.group.catch22, cortexR = rightcortex.group.catch22)
+xii.catch22.average.maps$meta$cifti$intent <- "3006"
+names <- (c("DN_HistogramMode_5","DN_HistogramMode_10","CO_f1ecac","CO_FirstMin_ac",
+              "CO_HistogramAMI_even_2_5", "CO_trev_1_num", "MD_hrv_classic_pnn40", 
+              "SB_BinaryStats_mean_longstretch1", "SB_TransitionMatrix_3ac_sumdiagcov",
+              "PD_PeriodicityWang_th0_01", "CO_Embed2_Dist_tau_d_expfit_meandiff",
+              "IN_AutoMutualInfoStats_40_gaussian_fmmi", "FC_LocalSimple_mean1_tauresrat",
+              "DN_OutlierInclude_p_001_mdrmd", "DN_OutlierInclude_n_001_mdrmd", 
+              "SP_Summaries_welch_rect_area_5_1", "SB_BinaryStats_diff_longstretch0",
+              "SB_MotifThree_quantile_hh", "SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1",
+              "SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1", "SP_Summaries_welch_rect_centroid",
+              "FC_LocalSimple_mean3_stderr"))
+xii.catch22.average.maps$meta$cifti$names <- names
+write_xifti(xii.catch22.average.maps, file.path("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/catch22_average_maps.dscalar.nii"))
+```

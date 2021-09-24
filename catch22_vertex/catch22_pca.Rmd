@@ -1,0 +1,649 @@
+---
+title: "Alpraz Catch22 PCA"
+author: "Valerie Jill Sydnor"
+output:
+  html_document:
+    code_folding: show
+    highlight: haddock
+    theme: lumen
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+library(ciftiTools)
+library(rgl)
+ciftiTools.setOption('wb_path', '/Users/valeriesydnor/Software/workbench/')
+rgl::setupKnitr()
+library(rmarkdown)
+library(knitr)
+```
+
+
+```{r}
+participants <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/sub_ses_passQC_finallist.csv", header = FALSE)
+```
+
+```{r}
+names <- (c("DN_HistogramMode_5","DN_HistogramMode_10","CO_f1ecac","CO_FirstMin_ac",
+              "CO_HistogramAMI_even_2_5", "CO_trev_1_num", "MD_hrv_classic_pnn40", 
+              "SB_BinaryStats_mean_longstretch1", "SB_TransitionMatrix_3ac_sumdiagcov",
+              "PD_PeriodicityWang_th0_01", "CO_Embed2_Dist_tau_d_expfit_meandiff",
+              "IN_AutoMutualInfoStats_40_gaussian_fmmi", "FC_LocalSimple_mean1_tauresrat",
+              "DN_OutlierInclude_p_001_mdrmd", "DN_OutlierInclude_n_001_mdrmd", 
+              "SP_Summaries_welch_rect_area_5_1", "SB_BinaryStats_diff_longstretch0",
+              "SB_MotifThree_quantile_hh", "SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1",
+              "SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1", "SP_Summaries_welch_rect_centroid",
+              "FC_LocalSimple_mean3_stderr"))
+```
+
+```{r}
+surfL_fname <- read_surf("/Users/valeriesydnor/Software/workbench/workbench_files/Q1-Q6_R440.L.midthickness.32k_fs_LR.surf.gii")
+surfR_fname <- read_surf("/Users/valeriesydnor/Software/workbench/workbench_files/Q1-Q6_R440.R.midthickness.32k_fs_LR.surf.gii")
+```
+
+```{r}
+catch22_pca <- function(catchnum){
+  #load in the catch22 measure's subject x vertex matrix, generated with catch22_pca_preparedata.R
+  inputmatrix <- readRDS(sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/catch%s.subxvertex.matrix.Rdata", catchnum))
+  
+  #format and clean the matrix
+  inputmatrix[inputmatrix == 0] <- NA #convert 0s to NAs
+  inputmatrix <- as.data.frame(inputmatrix) #convert matrix to df
+  inputmatrix.cleaned <- inputmatrix[, unlist(lapply(inputmatrix, function(x) !all(is.na(x))))] #remove all columns (vertices) with null data (all NAs)
+  
+  #What measure are we looking at now?
+  print(names[catchnum])
+  
+  #PCA
+  catch.pca <- prcomp(inputmatrix.cleaned, scale. = TRUE, center = TRUE) 
+  saveRDS(catch.pca, file = sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/loadings/%s.pca.loadings.Rdata", catchnum))
+  
+  #How much variance do the first ten components explain?
+  print(summary(catch.pca)$importance[2,1:10]*100)
+  
+  #Scree plot #eblow room eblow room
+  pve <- 100*(catch.pca$sdev)^2/sum ((catch.pca$sdev)^2)
+
+  plot(pve, pch=16, 
+     xlab="Principal Components",
+     ylab="Prop. of variance explained")
+  
+  #Save each subject's first 10 PCs to a csv
+  catch.pca.scores <- as.data.frame(catch.pca$x[,1:10]) #every subject's data (rows) for the first 10 PCs
+  catch.pca.scores$subid <- participants$V1 #match subids to scores
+  catch.pca.scores$sesid <- participants$V2 #match sesids to scores
+  write.csv(x= catch.pca.scores,
+            file = sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/scores/catch%s.PCA.scores.csv", catchnum),
+            quote = F, row.names = F)
+  
+  rm(inputmatrix)
+  rm(inputmatrix.cleaned)
+}
+```
+
+```{r}
+catch22_PC1_visualization <- function(catchnum){
+  catch.pca <- readRDS(sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/loadings/%s.pca.loadings.Rdata", catchnum))
+ 
+  #Visualize PC1 in the brain
+  ##To do: figure out for RH -- have to match PC loadings back to vertices counting for NA vertices
+  catch.pca.loadings.LH <- catch.pca$rotation[1:17781,1:10] #take loadings for the left cortex, and for the first 10 pcs
+  catch.pca.loadings.LH <- as.data.frame(catch.pca.loadings.LH)
+  loadings.left.cortex <- matrix(0, ncol=10, nrow=29696) #create an empty LH matrix
+  for(row in c(1:nrow(catch.pca.loadings.LH))){
+  vertexname <- row.names(catch.pca.loadings.LH[row,])
+  vertexnumber <- as.numeric(sub('.', '', vertexname))
+  loadings.left.cortex[vertexnumber,] <- unlist(catch.pca.loadings.LH[row,])
+  }
+  xii.loadings.LH <- as_xifti(cortexL = loadings.left.cortex)
+  xii.loadings.LH$data$cortex_left[xii.loadings.LH$data$cortex_left == 0] <- NA #convert 0 vertices to NA
+  xii.loadings.LH <- add_surf(xii.loadings.LH, surfL=surfL_fname, surfR=surfR_fname)
+  view_xifti_surface(xii.loadings.LH, idx=1, colors=c("RdBu"), hemisphere = c("left"), widget = TRUE)
+}
+```
+
+```{r}
+catch22_PC2_visualization <- function(catchnum){
+  catch.pca <- readRDS(sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/loadings/%s.pca.loadings.Rdata", catchnum))
+ 
+  #Visualize PC1 in the brain
+  ##To do: figure out for RH -- have to match PC loadings back to vertices counting for NA vertices
+  catch.pca.loadings.LH <- catch.pca$rotation[1:17781,1:10] #take loadings for the left cortex, and for the first 10 pcs
+  catch.pca.loadings.LH <- as.data.frame(catch.pca.loadings.LH)
+  loadings.left.cortex <- matrix(0, ncol=10, nrow=29696) #create an empty LH matrix
+  for(row in c(1:nrow(catch.pca.loadings.LH))){
+  vertexname <- row.names(catch.pca.loadings.LH[row,])
+  vertexnumber <- as.numeric(sub('.', '', vertexname))
+  loadings.left.cortex[vertexnumber,] <- unlist(catch.pca.loadings.LH[row,])
+  }
+  xii.loadings.LH <- as_xifti(cortexL = loadings.left.cortex)
+  xii.loadings.LH$data$cortex_left[xii.loadings.LH$data$cortex_left == 0] <- NA #convert 0 vertices to NA
+  xii.loadings.LH <- add_surf(xii.loadings.LH, surfL=surfL_fname, surfR=surfR_fname)
+  view_xifti_surface(xii.loadings.LH, idx=2, colors=c("RdBu"), hemisphere = c("left"), widget = TRUE)
+}
+```
+
+```{r}
+catch22_PC3_visualization <- function(catchnum){
+  catch.pca <- readRDS(sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/loadings/%s.pca.loadings.Rdata", catchnum))
+ 
+  #Visualize PC1 in the brain
+  ##To do: figure out for RH -- have to match PC loadings back to vertices counting for NA vertices
+  catch.pca.loadings.LH <- catch.pca$rotation[1:17781,1:10] #take loadings for the left cortex, and for the first 10 pcs
+  catch.pca.loadings.LH <- as.data.frame(catch.pca.loadings.LH)
+  loadings.left.cortex <- matrix(0, ncol=10, nrow=29696) #create an empty LH matrix
+  for(row in c(1:nrow(catch.pca.loadings.LH))){
+  vertexname <- row.names(catch.pca.loadings.LH[row,])
+  vertexnumber <- as.numeric(sub('.', '', vertexname))
+  loadings.left.cortex[vertexnumber,] <- unlist(catch.pca.loadings.LH[row,])
+  }
+  xii.loadings.LH <- as_xifti(cortexL = loadings.left.cortex)
+  xii.loadings.LH$data$cortex_left[xii.loadings.LH$data$cortex_left == 0] <- NA #convert 0 vertices to NA
+  xii.loadings.LH <- add_surf(xii.loadings.LH, surfL=surfL_fname, surfR=surfR_fname)
+  view_xifti_surface(xii.loadings.LH, idx=3, colors=c("RdBu"), hemisphere = c("left"), widget = TRUE)
+}
+```
+
+# DN_HistogramMode_5:  Mode of z-scored distribution (5-bin histogram)
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(1)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(1)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(1)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(1)
+```
+
+## DN_HistogramMode_10: Mode of z-scored distribution (10-bin histogram)
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(2)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(2)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(2)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(2)
+```
+
+## CO_f1ecac: First 1 / e crossing of autocorrelation function 
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#catch22_pca(3)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#catch22_PC1_visualization(3)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#catch22_PC2_visualization(3)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#catch22_PC3_visualization(3)
+```
+
+## CO_FirstMin_ac: 	First minimum of autocorrelation function
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(4)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(4)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(4)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(4)
+```
+
+## CO_HistogramAMI_even_2_5:	Automutual information, 𝑚=2,𝜏=5
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(5)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(5)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(5)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(5)
+```
+
+## CO_trev_1_num: Time-reversibility statistic, ⟨(𝑥𝑡+1−𝑥𝑡)3⟩𝑡
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(6)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(6)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(6)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(6)
+```
+
+## MD_hrv_classic_pnn40: Proportion of successive differences exceeding 0.04𝜎 (Mietus 2002)
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(7)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(7)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(7)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(7)
+```
+
+## SB_BinaryStats_mean_longstretch1: Longest period of consecutive values above the mean
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(8)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(8)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(8)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(8)
+```
+
+## SB_TransitionMatrix_3ac_sumdiagcov: 	Trace of covariance of transition matrix between symbols in 3-letter alphabet (*E:I dreadds excitation*)
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(9)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(9)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(9)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(9)
+```
+
+## PD_PeriodicityWang_th0_01: Periodicity measure of (Wang et al. 2007)
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(10)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(10)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(10)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(10)
+```
+
+## CO_Embed2_Dist_tau_d_expfit_meandiff: Exponential fit to successive distances in 2-d embedding space
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(11)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(11)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(11)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(11)
+```
+
+## IN_AutoMutualInfoStats_40_gaussian_fmmi: First minimum of the automutual information function
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(12)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(12)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(12)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(12)
+```
+
+## FC_LocalSimple_mean1_tauresrat: Change in correlation length after iterative differencing
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(13)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(13)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(13)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(13)
+```
+
+## DN_OutlierInclude_p_001_mdrmd: 	Time intervals between successive extreme events above the mean
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+inputmatrix <- readRDS("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/catch14.subxvertex.matrix.Rdata")
+
+inputmatrix[inputmatrix == 0] <- NA #convert 0s to NAs
+inputmatrix <- as.data.frame(inputmatrix) #convert matrix to df
+inputmatrix.cleaned <- inputmatrix[, unlist(lapply(inputmatrix, function(x) !all(is.na(x))))]
+
+#impute 10 NAs with mode of data in columns V25051 V25059 V54762 V50284 V50602 V54730 V54749
+inputmatrix.cleaned[47,"V25051"] <- median(na.omit(inputmatrix.cleaned$V25051))
+inputmatrix.cleaned[59,"V25051"] <- median(na.omit(inputmatrix.cleaned$V25051))
+inputmatrix.cleaned[28,"V25059"] <- median(na.omit(inputmatrix.cleaned$V25059))
+inputmatrix.cleaned[64,"V25059"] <- median(na.omit(inputmatrix.cleaned$V25059))
+inputmatrix.cleaned[10,"V54762"] <- median(na.omit(inputmatrix.cleaned$V54762))
+inputmatrix.cleaned[74,"V54762"] <- median(na.omit(inputmatrix.cleaned$V54762))
+inputmatrix.cleaned[17,"V50284"] <- median(na.omit(inputmatrix.cleaned$V50284))
+inputmatrix.cleaned[4,"V50602"] <- median(na.omit(inputmatrix.cleaned$V50602))
+inputmatrix.cleaned[60,"V54730"] <- median(na.omit(inputmatrix.cleaned$V54730))
+inputmatrix.cleaned[81,"V54749"] <- median(na.omit(inputmatrix.cleaned$V54749))
+
+catch.pca <- prcomp(inputmatrix.cleaned, scale. = TRUE, center = TRUE) 
+saveRDS(catch.pca, file = "/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/loadings/14.pca.loadings.Rdata")
+  
+print(summary(catch.pca)$importance[2,1:10]*100)
+  
+pve <- 100*(catch.pca$sdev)^2/sum ((catch.pca$sdev)^2)
+
+plot(pve, pch=16, 
+     xlab="Principal Components",
+     ylab="Prop. of variance explained")
+  
+catch.pca.scores <- as.data.frame(catch.pca$x[,1:10]) #every subject's data (rows) for the first 10 PCs
+catch.pca.scores$subid <- participants$V1 #match subids to scores
+catch.pca.scores$sesid <- participants$V2 #match sesids to scores
+write.csv(x= catch.pca.scores,
+            file = "/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/scores/catch14.PCA.scores.csv",
+            quote = F, row.names = F)
+  
+  rm(inputmatrix)
+  rm(inputmatrix.cleaned)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch.pca <- readRDS("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/loadings/14.pca.loadings.Rdata")
+ 
+catch.pca.loadings.LH <- catch.pca$rotation[1:17781,1:10] #take loadings for the left cortex, and for the first 10 pcs
+catch.pca.loadings.LH <- as.data.frame(catch.pca.loadings.LH)
+loadings.left.cortex <- matrix(0, ncol=10, nrow=29696) #create an empty LH matrix
+for(row in c(1:nrow(catch.pca.loadings.LH))){
+vertexname <- row.names(catch.pca.loadings.LH[row,])
+vertexnumber <- as.numeric(sub('.', '', vertexname))
+loadings.left.cortex[vertexnumber,] <- unlist(catch.pca.loadings.LH[row,])
+}
+xii.loadings.LH <- as_xifti(cortexL = loadings.left.cortex)
+xii.loadings.LH$data$cortex_left[xii.loadings.LH$data$cortex_left == 0] <- NA #convert 0 vertices to NA
+xii.loadings.LH <- add_surf(xii.loadings.LH, surfL=surfL_fname, surfR=surfR_fname)
+view_xifti_surface(xii.loadings.LH, idx=1, colors=c("RdBu"), hemisphere = c("left"), widget = TRUE)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+view_xifti_surface(xii.loadings.LH, idx=2, colors=c("RdBu"), hemisphere = c("left"), widget = TRUE)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+view_xifti_surface(xii.loadings.LH, idx=3, colors=c("RdBu"), hemisphere = c("left"), widget = TRUE)
+rm(catch.pca)
+rm(catch.pca.loadings.LH)
+rm(loadings.left.cortex)
+rm(xii.loadings.LH)
+```
+
+## DN_OutlierInclude_n_001_mdrmd: Time intervals between successive extreme events below the mean
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+inputmatrix <- readRDS("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/catch15.subxvertex.matrix.Rdata")
+
+inputmatrix[inputmatrix == 0] <- NA #convert 0s to NAs
+inputmatrix <- as.data.frame(inputmatrix) #convert matrix to df
+inputmatrix.cleaned <- inputmatrix[, unlist(lapply(inputmatrix, function(x) !all(is.na(x))))]
+
+#impute 8 NAs with mode of data in columns V25059  V1381 V1410 V20326 V26444 V54705 V54749 
+inputmatrix.cleaned[40,"V25059"] <- median(na.omit(inputmatrix.cleaned$V25059))
+inputmatrix.cleaned[67,"V25059"] <- median(na.omit(inputmatrix.cleaned$V25059))
+inputmatrix.cleaned[42,"V1381"] <- median(na.omit(inputmatrix.cleaned$V1381))
+inputmatrix.cleaned[42,"V1410"] <- median(na.omit(inputmatrix.cleaned$V1410))
+inputmatrix.cleaned[4,"V20326"] <- median(na.omit(inputmatrix.cleaned$V20326))
+inputmatrix.cleaned[14,"V26444"] <- median(na.omit(inputmatrix.cleaned$V26444))
+inputmatrix.cleaned[69,"V54705"] <- median(na.omit(inputmatrix.cleaned$V54705))
+inputmatrix.cleaned[84,"V54749"] <- median(na.omit(inputmatrix.cleaned$V54749))
+
+catch.pca <- prcomp(inputmatrix.cleaned, scale. = TRUE, center = TRUE) 
+saveRDS(catch.pca, file = "/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/loadings/15.pca.loadings.Rdata")
+  
+print(summary(catch.pca)$importance[2,1:10]*100)
+  
+pve <- 100*(catch.pca$sdev)^2/sum ((catch.pca$sdev)^2)
+
+plot(pve, pch=16, 
+     xlab="Principal Components",
+     ylab="Prop. of variance explained")
+  
+catch.pca.scores <- as.data.frame(catch.pca$x[,1:10]) #every subject's data (rows) for the first 10 PCs
+catch.pca.scores$subid <- participants$V1 #match subids to scores
+catch.pca.scores$sesid <- participants$V2 #match sesids to scores
+write.csv(x= catch.pca.scores,
+            file = "/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/scores/catch15.PCA.scores.csv",
+            quote = F, row.names = F)
+  
+  rm(inputmatrix)
+  rm(inputmatrix.cleaned)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch.pca <- readRDS("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/pca/loadings/15.pca.loadings.Rdata")
+ 
+catch.pca.loadings.LH <- catch.pca$rotation[1:17781,1:10] #take loadings for the left cortex, and for the first 10 pcs
+catch.pca.loadings.LH <- as.data.frame(catch.pca.loadings.LH)
+loadings.left.cortex <- matrix(0, ncol=10, nrow=29696) #create an empty LH matrix
+for(row in c(1:nrow(catch.pca.loadings.LH))){
+vertexname <- row.names(catch.pca.loadings.LH[row,])
+vertexnumber <- as.numeric(sub('.', '', vertexname))
+loadings.left.cortex[vertexnumber,] <- unlist(catch.pca.loadings.LH[row,])
+}
+xii.loadings.LH <- as_xifti(cortexL = loadings.left.cortex)
+xii.loadings.LH$data$cortex_left[xii.loadings.LH$data$cortex_left == 0] <- NA #convert 0 vertices to NA
+xii.loadings.LH <- add_surf(xii.loadings.LH, surfL=surfL_fname, surfR=surfR_fname)
+view_xifti_surface(xii.loadings.LH, idx=1, colors=c("RdBu"), hemisphere = c("left"), widget = TRUE)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+view_xifti_surface(xii.loadings.LH, idx=2, colors=c("RdBu"), hemisphere = c("left"), widget = TRUE)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+view_xifti_surface(xii.loadings.LH, idx=3, colors=c("RdBu"), hemisphere = c("left"), widget = TRUE)
+rm(catch.pca)
+rm(catch.pca.loadings.LH)
+rm(loadings.left.cortex)
+rm(xii.loadings.LH)
+```
+
+## SP_Summaries_welch_rect_area_5_1: 	Total power in lowest fifth of frequencies in the Fourier power spectrum (*E:I dreadds excitation*)
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(16)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(16)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(16)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(16)
+```
+
+## SB_BinaryStats_diff_longstretch0: 	Longest period of successive incremental decreases
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(17)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(17)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(17)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(17)
+```
+
+## SB_MotifThree_quantile_hh: 	Shannon entropy of two successive letters in equiprobable 3-letter symbolization
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(18)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(18)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(18)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(18)
+```
+
+## SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1: 	Proportion of slower timescale fluctuations that scale with linearly rescaled range fits
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(19)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(19)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(19)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(19)
+```
+
+## SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1: Proportion of slower timescale fluctuations that scale with DFA (50% sampling)
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(20)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(20)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(20)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(20)
+```
+
+## SP_Summaries_welch_rect_centroid: Centroid of the Fourier power spectrum (*E:I dreadds inhibition*)
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(21)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(21)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(21)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(21)
+```
+
+## FC_LocalSimple_mean3_stderr: Mean error from a rolling 3-sample mean forecasting (*E:I dreadds excitation*)
+### PCA Variance
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_pca(22)
+```
+### PC 1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC1_visualization(22)
+```
+### PC 2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC2_visualization(22)
+```
+### PC 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+catch22_PC3_visualization(22)
+```

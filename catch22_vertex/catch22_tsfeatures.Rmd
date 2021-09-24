@@ -1,0 +1,100 @@
+---
+title: "Alpraz Catch22 Timeseries Feature Analysis"
+author: "Valerie Jill Sydnor"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ciftiTools)
+library(catch22)
+library(rgl)
+ciftiTools.setOption('wb_path', '/Users/valeriesydnor/Software/workbench/')
+rgl::setupKnitr()
+```
+
+```{r}
+alpraz_cifti_catch22 <- function(subid, sesid){
+  
+  #load in the residual surface timeseries and specify surface files
+  cifti.path = sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/xcpabcd/task_regress/surface/xcp_abcd/%1$s/%2$s/func/%1$s_%2$s_task-emotionid_space-fsLR_den-91k_desc-residual_den-91k_bold.dtseries.nii", subid, sesid)
+  xii <- read_xifti(cifti.path)
+ 
+  #apply catch22 to each vertex to generate 22 timeseries measures
+      #left hemisphere
+      catch22.Lcortex <- matrix(NA, ncol=22, nrow=nrow(xii$data$cortex_left)) #empty 29696X22 LH matrix
+      for(row in c(1:nrow(xii$data$cortex_left))){
+        if(sum(xii$data$cortex_left[row,]^2) < 50) #if TR sum of squares is < 50
+          { 
+          #assign 0 to each of the catch22 measures
+          names <- as.matrix(t(c("DN_HistogramMode_5","DN_HistogramMode_10","CO_f1ecac","CO_FirstMin_ac",
+              "CO_HistogramAMI_even_2_5", "CO_trev_1_num", "MD_hrv_classic_pnn40", 
+              "SB_BinaryStats_mean_longstretch1", "SB_TransitionMatrix_3ac_sumdiagcov",
+              "PD_PeriodicityWang_th0_01", "CO_Embed2_Dist_tau_d_expfit_meandiff",
+              "IN_AutoMutualInfoStats_40_gaussian_fmmi", "FC_LocalSimple_mean1_tauresrat",
+              "DN_OutlierInclude_p_001_mdrmd", "DN_OutlierInclude_n_001_mdrmd", 
+              "SP_Summaries_welch_rect_area_5_1", "SB_BinaryStats_diff_longstretch0",
+              "SB_MotifThree_quantile_hh", "SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1",
+              "SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1", "SP_Summaries_welch_rect_centroid",
+              "FC_LocalSimple_mean3_stderr")))
+          values <- data.matrix(t((replicate(22, 0))))
+          catch.df <- rbind(names, values)
+        }
+        else
+          #run catch22 
+          catch.df <- (data.matrix(t(catch22_all(xii$data$cortex_left[row,]))))
+        #add vertex data to the LH matrix
+        catch22.Lcortex[row,] <- catch.df[2,]
+      }
+      class(catch22.Lcortex) <- "numeric" 
+
+      #right hemisphere
+      catch22.Rcortex <- matrix(NA, ncol=22, nrow=nrow(xii$data$cortex_right)) #empty 29716X22 LH matrix
+      for(row in c(1:nrow(xii$data$cortex_right))){
+        if(sum(xii$data$cortex_right[row,]^2) < 50) #if TR sum of squares is < 50
+          { 
+          #assign 0 to each of the catch22 measures
+          names <- as.matrix(t(c("DN_HistogramMode_5","DN_HistogramMode_10","CO_f1ecac","CO_FirstMin_ac",
+              "CO_HistogramAMI_even_2_5", "CO_trev_1_num", "MD_hrv_classic_pnn40", 
+              "SB_BinaryStats_mean_longstretch1", "SB_TransitionMatrix_3ac_sumdiagcov",
+              "PD_PeriodicityWang_th0_01", "CO_Embed2_Dist_tau_d_expfit_meandiff",
+              "IN_AutoMutualInfoStats_40_gaussian_fmmi", "FC_LocalSimple_mean1_tauresrat",
+              "DN_OutlierInclude_p_001_mdrmd", "DN_OutlierInclude_n_001_mdrmd", 
+              "SP_Summaries_welch_rect_area_5_1", "SB_BinaryStats_diff_longstretch0",
+              "SB_MotifThree_quantile_hh", "SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1",
+              "SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1", "SP_Summaries_welch_rect_centroid",
+              "FC_LocalSimple_mean3_stderr")))
+          values <- data.matrix(t((replicate(22, 0))))
+          catch.df <- rbind(names, values)
+        }
+        else
+          #run catch22 
+          catch.df <- (data.matrix(t(catch22_all(xii$data$cortex_right[row,]))))
+        #add vertex data to the RH matrix
+        catch22.Rcortex[row,] <- catch.df[2,]
+      }
+      class(catch22.Rcortex) <- "numeric" 
+      
+  #write the catch22 output in a cifti file
+  xii.catch22 <- as.xifti(cortexL = catch22.Lcortex, cortexR = catch22.Rcortex, HCP_32k_auto_mwall = TRUE,
+                          col_names = catch.df[1,])
+  xii.catch22$meta$cifti$intent <- "3006" #dscalar intent specification
+  
+  #smooth the catch22 data and save the cifti file
+  dir.create(path = sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/%1$s/%2$s/", subid, sesid), recursive = TRUE)
+  smooth_xifti(x = xii.catch22, surf_FWHM = 6, cortical_zeroes_as_NA = TRUE, cifti_target_fname =
+                 sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/%1$s/%2$s/%1$s_%2$s_catch22_tsfeatures.dscalar.nii", subid, sesid))
+}
+```
+
+```{r}
+participants <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/sub_ses_passQC_finallist.csv", header = FALSE)
+```
+
+```{r}
+for(row in c(1:nrow(participants))){
+  subid=participants[row,1]
+  sesid=participants[row,2]
+  if(!(file.exists(sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/catch22/%1$s/%2$s/%1$s_%2$s_catch22_tsfeatures.dscalar.nii", subid, sesid))))
+  alpraz_cifti_catch22(subid, sesid)
+}
+```

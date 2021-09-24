@@ -1,0 +1,51 @@
+---
+title: "Surface QC: Euler Number"
+author: "Valerie Jill Sydnor"
+date: "8/17/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(PupillometryR)
+library(tidyr)
+library(reshape2)
+```
+
+```{r}
+fsQC <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/fmriprep/freesurfer/alpraz_fs_audit.csv", header=T)
+fsQC <- fsQC %>% filter(SubjectID != "sub-012097")
+fsQC <- fsQC %>% filter(SubjectID != "sub-012116")
+fsQC <- fsQC %>% filter(SubjectID != "sub-012910")
+fsQC <- fsQC %>% filter(SubjectID != "sub-013583")
+```
+
+```{r}
+datal <- melt(fsQC, id.vars = c("SubjectID"), measure.vars = c("AverageEulerNumber"), variable.name = "AverageEuler", value.name = "EulerNumber")
+ggplot(data = datal, aes(y = EulerNumber, x = AverageEuler, fill = AverageEuler )) +
+geom_flat_violin(position = position_nudge(x = .0, y = 0), alpha = .99, fill = c("#3f55a5")) +
+geom_point(aes(y=EulerNumber, x=.75), pch = 21, position = position_jitter(width = .15), size = 2, stroke = .5, alpha = .85) +
+geom_boxplot(width = .13, position = position_nudge(x = -.24), outlier.shape = NA, alpha = 0.5, fill = c("#3f55a5")) +
+scale_color_manual(values=c("black","black")) +
+scale_fill_manual(values=c("black","gray65")) +
+expand_limits(x = 3.5) +
+theme_bw() +
+theme(
+text = element_text(size = 10),
+axis.title.x = element_blank(),
+axis.title.y = element_blank(),
+axis.text.x = element_blank(),
+axis.text.y = element_text(family="Arial",size=28, color = "black"),
+axis.ticks.x = element_blank(),
+legend.position = "none",
+panel.border = element_blank(),
+panel.grid.minor = element_blank(),
+panel.grid.major = element_blank(),
+axis.line.x = element_line(colour = 'black', size=.8, linetype='solid'),
+axis.line.y = element_line(colour = 'black', size=.8, linetype='solid')) 
+```
+```{r}
+z_scores <- (fsQC$AverageEulerNumber-mean(fsQC$AverageEulerNumber))/sd(fsQC$AverageEulerNumber)
+z_scores %>% sort()
+```
