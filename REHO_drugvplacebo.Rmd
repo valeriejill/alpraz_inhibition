@@ -616,7 +616,7 @@ AUC <- function(DecisionValues, labels){
 
 **Drug v. Placebo SVM (Glasser)**
 
-```{r, echo=T, eval=F}
+```{r, echo=T}
 regionheaders <- glasser.parcel.labels$label
 demoheaders <- c("subid","sesid","drug","meanFD")
 colheaders <- as.matrix(c(demoheaders,regionheaders))
@@ -672,7 +672,7 @@ b$accuracy <- accuracy
 
 ### Permutation p-value significance
 
-```{r, echo=T,  results='hide'}
+```{r, echo=T,  eval = F, results='hide'}
 num_permutations = 1000
 nw=1
 folds="LOO"
@@ -708,13 +708,13 @@ pred_data_list <- lapply(perm_list, function(x) x[[1]][[1]])
 perm_Ws <- lapply(perm_list,function(x) x[[1]][[2]])
 ```
 
-```{r}
+
+```{r, echo=T, eval=F}
 # Calculating permutation accuracies and AUCs
 perm_acc_distribution <- sapply(pred_data_list, function(x) sum(x[[1]]$model.pred==x[[1]]$drug)/length(x[[1]]$drug))
-print("How many times is the permuted accuracy greater than the actual accuracy?")
-sum(perm_acc_distribution>accuracy)
+
 perm_p <- sum(perm_acc_distribution>accuracy)/length(perm_acc_distribution)
-cat(sprintf("\nPermutation p-value =  %1.3f\n",perm_p))
+
 perm_auc_distribution <- sapply(pred_data_list, function(x) AUC(DecisionValues=x[[1]]$decisionValues,labels=x[[1]]$drug))
     
     
@@ -728,17 +728,25 @@ b$perm_W_sig <- W_sig
 b$perm_accs = perm_acc_distribution
 b$perm_aucs = perm_auc_distribution
 
-print(sprintf("Overall Accuracy: %1.3f; p = %.5f\n\n",accuracy,b$perm_p))
   
 saveRDS(b, file="/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/REHO/reho.SVM.permutations.glasser.rds")
 saveRDS(W, file="/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/REHO/reho.SVM.weights.glasser.rds")
+```
+
+```{r}
+b <- readRDS("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/REHO/reho.SVM.permutations.glasser.rds")
+W <- readRDS("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/REHO/reho.SVM.weights.glasser.rds")
+print("How many times is the permuted accuracy greater than the actual accuracy?")
+sum(b$perm_accs>accuracy)
+
+print(sprintf("Overall Accuracy: %1.3f; p = %.5f\n\n",accuracy,b$perm_p))
 
 ```
 
 ### P-value distribution
 
 ```{r}
-hist(perm_acc_distribution, col="grey")
+hist(b$perm_accs, col="grey")
 abline(v = accuracy, col="dodgerblue3", lwd=3, lty=2)
 ```
 
@@ -1019,7 +1027,7 @@ b$accuracy <- accuracy
 ### Permutation p-value significance
 
 
-```{r, echo=T, results='hide'}
+```{r, echo=T, eval=F, results='hide'}
 num_permutations = 1000
 nw=1
 folds="LOO"
@@ -1038,7 +1046,7 @@ perm_list = foreach(perm_chunk = idiv(num_permutations,chunks = nw),
                             cat(sprintf("\nPermutation %d",p))
                             thisDF <- df
                             # thisDF$drug <- df$drug[thisPerm]
-                            permuted <- df %>% select(subid,drug) %>% group_by(subid) %>% mutate(perm_drug=sample(drug))
+                            permuted <- df %>% dplyr::select(subid,drug) %>% group_by(subid) %>% mutate(perm_drug=sample(drug))
                             thisDF$drug <- permuted$perm_drug
                             perm_pred_result <- SVM_2class(thisDF,folds,
                                                            feature_selection = feature_selection,
@@ -1055,13 +1063,12 @@ pred_data_list <- lapply(perm_list, function(x) x[[1]][[1]])
 perm_Ws <- lapply(perm_list,function(x) x[[1]][[2]])
 ```
 
-```{r}
+```{r, echo=T, eval=F}
 # Calculating permutation accuracies and AUCs
 perm_acc_distribution <- sapply(pred_data_list, function(x) sum(x[[1]]$model.pred==x[[1]]$drug)/length(x[[1]]$drug))
-print("How many times is the permuted accuracy greater than the actual accuracy?")
-sum(perm_acc_distribution>accuracy)
+
 perm_p <- sum(perm_acc_distribution>accuracy)/length(perm_acc_distribution)
-cat(sprintf("\nPermutation p-value =  %1.3f\n",perm_p))
+
 perm_auc_distribution <- sapply(pred_data_list, function(x) AUC(DecisionValues=x[[1]]$decisionValues,labels=x[[1]]$drug))
     
     
@@ -1075,17 +1082,26 @@ b$perm_W_sig <- W_sig
 b$perm_accs = perm_acc_distribution
 b$perm_aucs = perm_auc_distribution
 
-print(sprintf("Overall Accuracy: %1.3f; p = %.5f\n\n",accuracy,b$perm_p))
 
 saveRDS(b, file="/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/REHO/reho.SVM.permutations.schaefer.rds")
 
 saveRDS(W, file="/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/REHO/reho.SVM.weights.schaefer.rds")
 ```
 
+```{r}
+b <- readRDS("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/REHO/reho.SVM.permutations.schaefer.rds")
+W <- readRDS("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/REHO/reho.SVM.weights.schaefer.rds")
+
+print("How many times is the permuted accuracy greater than the actual accuracy?")
+sum(b$perm_accs>accuracy)
+
+print(sprintf("Overall Accuracy: %1.3f; p = %.5f\n\n",accuracy,b$perm_p))
+```
+
 ### P-value distribution
 
 ```{r}
-hist(perm_acc_distribution, col="grey")
+hist(b$perm_accs, col="grey")
 abline(v = accuracy, col="dodgerblue3", lwd=3, lty=2)
 ```
 

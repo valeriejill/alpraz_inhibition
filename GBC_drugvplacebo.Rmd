@@ -1,0 +1,800 @@
+---
+title: "GBC Alpraz: The effects of GABAergic agonists on global brain connectivity"
+author: "Valerie Jill Sydnor"
+output:
+  html_document:
+    code_folding: show
+    highlight: haddock
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ciftiTools)
+ciftiTools.setOption('wb_path', '/Users/valeriesydnor/Software/workbench/')
+library(gifti)
+library(cifti)
+library(ggseg)
+library(ggsegExtra)
+library(ggsegGlasser)
+library(ggsegSchaefer)
+library(viridis)
+require(ggplot2)
+library(ppcor)
+library(dplyr)
+library(e1071)
+library(matrixTests)
+library(doParallel)
+```
+
+Read in Alpraz Participant Data 
+```{r}
+participants <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/sub_ses_passQC_finallist.csv", header = FALSE)
+```
+
+Read in Atlases  
+```{r}
+SAaxis.schaefer <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/software/S-A_ArchetypalAxis/Schaefer400_17Network/Sensorimotor_Association_Axis_AverageRanks.csv", header=T)
+SAaxis.glasser <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/software/S-A_ArchetypalAxis/Glasser360_MMP/Sensorimotor_Association_Axis_AverageRanks.csv", header=T)
+brainmaps.schaefer <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/software/S-A_ArchetypalAxis/Schaefer400_17Network/brainmaps_schaefer.csv", header=T)
+brainmaps.glasser <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/software/S-A_ArchetypalAxis/Glasser360_MMP/brainmaps_glasser.csv", header=T)
+schaefer.parcel.labels <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/atlases/schaefer400_regionlist.csv", header = T)
+glasser.parcel.labels <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/atlases/glasser360_regionlist.csv", header = T)
+mappys <- read.csv("/Users/valeriesydnor/Software/mappys/mappings_400.csv")
+mappys$label <- schaefer.parcel.labels$label
+```
+
+Read in Cortical Mask
+```{r}
+schaefer400.parcelmask.thresholded <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/atlases/study_cortexmask_schaefer400_thresholded.txt")
+glasser360.parcelmask.threshold <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/atlases/study_cortexmask_glasser360_thresholded.txt")
+```
+
+## Compute Global Brain Connectivity (GBC)
+
+```{r}
+computeGBC <- function(subid, sesid, atlas, method){
+  
+  #read in connectivity matrix
+  if(atlas == "schaefer"){
+    connect.matrix <- read_cifti(sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/xcpabcd/task_regress/surface/xcp_abcd/%1$s/%2$s/func/%1$s_%2$s_task-emotionid_space-fsLR_atlas-Schaefer417_den-91k_den-91k_bold.pconn.nii", subid, sesid))
+    cortical.mask <- schaefer400.parcelmask.thresholded$x
+    }
+  if(atlas == "glasser"){
+    connect.matrix <- read_cifti(sprintf("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/xcpabcd/task_regress/surface/xcp_abcd/%1$s/%2$s/func/%1$s_%2$s_task-emotionid_space-fsLR_atlas-Glasser_den-91k_den-91k_bold.pconn.nii", subid, sesid))
+    cortical.mask <- glasser360.parcelmask.threshold$x
+    }
+
+  #compute average connectivity 
+  if(method == "reg"){
+    GBC.unmasked <- as.array(rowMeans(connect.matrix$data, na.rm = T)) #calculate average connectivity, ignoring parcels outside the FOV
+    GBC <- sweep(GBC.unmasked, MARGIN = 1, cortical.mask, `*`)
+    GBC <- as.data.frame(GBC)
+    GBC[GBC == 0] <- NA  
+  }
+  if(method == "pos"){
+    connect.matrix$data <- replace(connect.matrix$data, which(connect.matrix$data < 0), NA)
+    GBC.unmasked <- as.array(rowMeans(connect.matrix$data, na.rm = T)) #calculate average connectivity, ignoring parcels outside the FOV
+    GBC <- sweep(GBC.unmasked, MARGIN = 1, cortical.mask, `*`)
+    GBC <- as.data.frame(GBC)
+    GBC[GBC == 0] <- NA  
+  }
+  if(method == "abs"){
+    GBC.unmasked <- as.array(rowMeans(abs(connect.matrix$data), na.rm = T)) #calculate average connectivity, ignoring parcels outside the FOV
+    GBC <- sweep(GBC.unmasked, MARGIN = 1, cortical.mask, `*`)
+    GBC <- as.data.frame(GBC)
+    GBC[GBC == 0] <- NA  
+  }
+  if(method == "sum"){
+    connect.matrix$data <- replace(connect.matrix$data, which(connect.matrix$data >= 0.25), 1)
+    connect.matrix$data <- replace(connect.matrix$data, which(connect.matrix$data <= -0.25), 1)
+    connect.matrix$data <- replace(connect.matrix$data, which(connect.matrix$data != 1), 0)
+    GBC.unmasked <- as.array(rowSums(connect.matrix$data), na.rm = T) #calculate average connectivity, ignoring parcels outside the FOV
+    GBC <- sweep(GBC.unmasked, MARGIN = 1, cortical.mask, `*`)
+    GBC <- as.data.frame(GBC)
+    GBC[GBC == 0] <- NA  
+  }
+  return(GBC)
+  }
+```
+
+```{r, echo=T, eval=F, warning=F, message=F}
+GBC.subxparcel.matrix.schaefer <- matrix(data = NA, nrow = 84, ncol = 404)
+regionheaders <- schaefer.parcel.labels$label
+demoheaders <- c("subid","sesid","drug","meanFD")
+colheaders <- as.matrix(c(demoheaders,regionheaders))
+colnames(GBC.subxparcel.matrix.schaefer) <- colheaders
+
+for(row in c(1:nrow(participants))){
+  subid=participants[row,1]
+  sesid=participants[row,2]
+  drug=participants[row,3]
+  meanFD=participants[row,4]
+  data <- computeGBC(subid, sesid, "schaefer", "sum")
+  df <- cbind(subid, sesid, drug, meanFD, t(data))
+  GBC.subxparcel.matrix.schaefer[row,] <- df
+}
+
+GBC.subxparcel.matrix.glasser <- matrix(data = NA, nrow = 84, ncol = 364)
+regionheaders <- glasser.parcel.labels$orig_parcelname
+demoheaders <- c("subid","sesid","drug","meanFD")
+colheaders <- as.matrix(c(demoheaders,regionheaders))
+colnames(GBC.subxparcel.matrix.glasser) <- colheaders
+
+for(row in c(1:nrow(participants))){
+  subid=participants[row,1]
+  sesid=participants[row,2]
+  drug=participants[row,3]
+  meanFD=participants[row,4]
+  data <- computeGBC(subid, sesid, "glasser", "sum")
+  df <- cbind(subid, sesid, drug, meanFD, t(data))
+  GBC.subxparcel.matrix.glasser[row,] <- df
+}
+
+write.csv(GBC.subxparcel.matrix.schaefer, "/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/GBC/sumGBC_subxparcel_matrix_schaefer.csv", row.names=F, quote=F)
+write.csv(GBC.subxparcel.matrix.glasser, "/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/GBC/sumGBC_subxparcel_matrix_glasser.csv", row.names=F, quote=F)
+```
+
+```{r}
+GBC.schaefer <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/GBC/GBC_subxparcel_matrix_schaefer.csv")
+GBC.glasser <- read.csv("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/GBC/GBC_subxparcel_matrix_glasser.csv")
+```
+
+## Visualize GBC Map
+
+**Visualze across-cortex regional homogeneity: Schaefer**
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=F}
+GBC.schaefer.map <- GBC.schaefer %>% dplyr::select(-subid, -sesid, -drug, -meanFD)
+GBC.schaefer.map <- colMeans(GBC.schaefer.map)
+GBC.schaefer.map <- as.data.frame(GBC.schaefer.map)
+GBC.schaefer.map$label <- schaefer.parcel.labels$label
+
+ggseg(.data = GBC.schaefer.map, atlas = "schaefer17_400", mapping=aes(fill=GBC.schaefer.map), position = c("stacked")) + theme_void() + scale_fill_gradientn(colors = viridis_pal(option="B")(10))
+```
+
+**Visualze across-cortex regional homogeneity: Glasser**
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, comment=F}
+GBC.glasser.map <- GBC.glasser %>% dplyr::select(-subid, -sesid, -drug, -meanFD)
+GBC.glasser.map <- colMeans(GBC.glasser.map)
+GBC.glasser.map <- as.data.frame(GBC.glasser.map)
+GBC.glasser.map$label <- glasser.parcel.labels$label
+
+ggseg(.data = GBC.glasser.map, atlas = "glasser", mapping=aes(fill=GBC.glasser.map), position = c("stacked")) + theme_void() + scale_fill_gradientn(colors = viridis_pal(option="B")(10))
+```
+
+## Relationship to S-A Axis and Inhibitory Interneurons
+
+### S-A Axis
+
+```{r echo=FALSE}
+print("Schaefer S-A Axis")
+cor.test(GBC.schaefer.map$GBC.schaefer.map, SAaxis.schaefer$finalrank.wholebrain, method=c("spearman"),exact=F)
+print("Glasser S-A Axis")
+cor.test(GBC.glasser.map$GBC.glasser.map[181:360], SAaxis.glasser$brains.average.rank, method=c("spearman"),exact=F)
+```
+
+### T1T2 Hierarchy
+
+```{r echo=FALSE}
+print("Schaefer T1T2")
+cor.test(GBC.schaefer.map$GBC.schaefer.map, brainmaps.schaefer$T1T2ratio , method=c("spearman"))
+print("Glasser T1T2")
+cor.test(GBC.glasser.map$GBC.glasser.map[181:360], brainmaps.glasser$T1T2ratio, method=c("spearman"))
+```
+
+### Inhibitory Interneurons
+
+* PVALB
+
+```{r echo=FALSE}
+cor.test(GBC.schaefer.map$GBC.schaefer.map, mappys$PVALB , method=c("spearman"))
+```
+
+* SST
+
+```{r echo=FALSE}
+cor.test(GBC.schaefer.map$GBC.schaefer.map, mappys$SST , method=c("spearman"))
+```
+
+## Placebo versus GABA Agonist Paired T-tests
+
+### Schaefer
+
+#### P-values
+
+```{r, warning=F, comment=F}
+drug <- GBC.schaefer %>% filter(drug == 0)
+drug <- drug %>% select(-subid, -sesid, -drug, -meanFD)
+placebo <- GBC.schaefer %>% filter(drug == 1)
+placebo <- placebo %>% select(-subid, -sesid, -drug, -meanFD)
+
+#run paired t-tests on each parcel (column)
+tstats <- col_t_paired(drug, placebo)
+```
+
+```{r echo=FALSE}
+num <- nrow(as.data.frame(tstats$pvalue) %>% filter(`tstats$pvalue` < 0.05))
+print(sprintf("Number of significant parcels (uncorrected): %s", num))
+```
+
+#### P-value Histograms 
+
+```{r echo=FALSE}
+#p-value histograms
+ps.fdr <- p.adjust(na.omit(tstats$pvalue))
+par(mfrow=c(1,2))
+hist(tstats$pvalue, col = "#781d75", xlab = "Paired t-test p-values", main="")
+hist(ps.fdr, col = "#c76612", xlab = "Paired t-test FDR-corrected p-values", main="")
+```
+
+#### T-statistic Histogram
+
+```{r echo=FALSE}
+#distribution of t-values
+hist(tstats$statistic, col = "#e8b323", xlab = "Paired t-test t-values", main="")
+```
+
+#### T-statistic Map
+
+*GBC higher in GABA > placebo, the t-statistic is positive (yellow)  
+
+*GBC lower in GABA < placebo, the t-statistic is negative (purple)
+
+```{r, warning=F, echo=F, comment=F, message=F}
+tstatistics <- tstats$statistic
+tstatistics <- as.data.frame(tstatistics)
+tstatistics$label <- schaefer.parcel.labels$label
+
+ggseg(.data = tstatistics, atlas = "schaefer17_400",  mapping=aes(fill=tstatistics), position = c("stacked")) + theme_void() + scale_fill_gradient2(high= "goldenrod1", mid = "white", low = "#6f1282", guide = "colourbar", aesthetics = "fill", name = NULL)
+```
+
+### Glasser
+
+#### P-values
+
+```{r, warning=F, comment=F}
+drug <- GBC.glasser %>% filter(drug == 0)
+drug <- drug %>% select(-subid, -sesid, -drug, -meanFD)
+placebo <- GBC.glasser %>% filter(drug == 1)
+placebo <- placebo %>% select(-subid, -sesid, -drug, -meanFD)
+
+#run paired t-tests on each parcel (column)
+tstats <- col_t_paired(drug, placebo)
+```
+
+```{r echo=FALSE}
+num <- nrow(as.data.frame(tstats$pvalue) %>% filter(`tstats$pvalue` < 0.05))
+print(sprintf("Number of significant parcels (uncorrected): %s", num))
+```
+
+#### P-value Histograms 
+
+```{r echo=FALSE}
+#p-value histograms
+ps.fdr <- p.adjust(na.omit(tstats$pvalue))
+par(mfrow=c(1,2))
+hist(tstats$pvalue, col = "#781d75", xlab = "Paired t-test p-values", main="")
+hist(ps.fdr, col = "#c76612", xlab = "Paired t-test FDR-corrected p-values", main="")
+```
+
+#### T-statistic Histogram
+
+```{r echo=FALSE}
+#distribution of t-values
+hist(tstats$statistic, col = "#ffd000", xlab = "Paired t-test t-values", main="")
+```
+
+#### T-statistic Map
+
+*GBC higher in GABA > placebo, the t-statistic is positive (yellow)  
+
+*GBC lower in GABA < placebo, the t-statistic is negative (purple)
+
+```{r, warning=F, echo=F, comment=F, message=F}
+tstatistics <- tstats$statistic
+tstatistics <- as.data.frame(tstatistics)
+tstatistics$label <- glasser.parcel.labels$label
+
+ggseg(.data = tstatistics, atlas = "glasser",  mapping=aes(fill=tstatistics), position = c("stacked")) + theme_void() + scale_fill_gradient2(high= "goldenrod1", mid = "white", low = "#6f1282", guide = "colourbar", aesthetics = "fill", name = NULL)
+```
+
+## PCA and Logistic Regression
+
+### Schaefer
+
+#### PCA Variance Explained
+
+```{r}
+inputmatrix <- GBC.schaefer
+inputmatrix <- inputmatrix %>% dplyr::select(-subid, -sesid, -drug, -meanFD) 
+inputmatrix <- inputmatrix %>% mutate_if(is.character,as.numeric)
+inputmatrix <- as.data.frame(inputmatrix) #convert matrix to df
+inputmatrix[inputmatrix == 0] <- NA
+inputmatrix.cleaned <- inputmatrix[, unlist(lapply(inputmatrix, function(x) !all(is.na(x))))] #remove all columns (parcels) with null data (all NAs) #84x232
+GBC.pca.schaefer <- prcomp(inputmatrix.cleaned, scale. = TRUE, center = TRUE) 
+print(summary(GBC.pca.schaefer)$importance[2,1:10]*100)
+pve <- 100*(GBC.pca.schaefer$sdev)^2/sum ((GBC.pca.schaefer$sdev)^2)
+plot(pve, pch=16, 
+   xlab="Principal Components",
+  ylab="Prop. of variance explained")
+```
+
+#### PC1
+
+```{r echo=FALSE}
+pc1 <- as.data.frame(GBC.pca.schaefer$rotation[,1])
+pc1$label <- row.names(pc1)
+colnames(pc1) <- c("PC1","label")
+ggseg(.data = pc1, atlas = "schaefer17_400", mapping=aes(fill=PC1), position = c("stacked")) + theme_void() + scale_fill_gradientn(colors = viridis_pal(option="B")(10))
+```
+
+Correlation with mean map 
+```{r echo=FALSE}
+means.tmp <- na.omit(GBC.schaefer.map)
+cor.test(means.tmp$GBC.schaefer.map, pc1$PC1, method=c("spearman"))
+```
+
+#### Logistic Regression 
+
+```{r}
+GBC.pca.schaefer.scores <- as.data.frame(GBC.pca.schaefer$x[,1:10])
+GBC.pca.schaefer.scores$subid <- participants$V1 
+GBC.pca.schaefer.scores$sesid <- participants$V2
+GBC.pca.schaefer.scores$drug <- participants$V3 
+GBC.pca.schaefer.scores$meanFD <- participants$V4
+
+summary(glm(as.factor(GBC.pca.schaefer.scores$drug) ~ GBC.pca.schaefer.scores$PC1 + GBC.pca.schaefer.scores$meanFD, family=binomial(logit)))
+```
+
+### Glasser 
+
+**REHO PCA and PC scores logistic regression for drug/placebo prediction (Glasser)**
+
+#### PCA Variance Explained
+
+```{r}
+inputmatrix <- GBC.glasser
+inputmatrix <- inputmatrix %>% dplyr::select(-subid, -sesid, -drug, -meanFD) 
+inputmatrix <- inputmatrix %>% mutate_if(is.character,as.numeric)
+inputmatrix <- as.data.frame(inputmatrix) #convert matrix to df
+inputmatrix[inputmatrix == 0] <- NA
+inputmatrix.cleaned <- inputmatrix[, unlist(lapply(inputmatrix, function(x) !all(is.na(x))))] #remove all columns (parcels) with null data (all NAs) #84x232
+GBC.pca.glasser <- prcomp(inputmatrix.cleaned, scale. = TRUE, center = TRUE) 
+print(summary(GBC.pca.glasser)$importance[2,1:10]*100)
+pve <- 100*(GBC.pca.glasser$sdev)^2/sum ((GBC.pca.glasser$sdev)^2)
+plot(pve, pch=16, 
+   xlab="Principal Components",
+  ylab="Prop. of variance explained")
+```
+
+#### Logistic Regression 
+
+```{r}
+GBC.pca.glasser.scores <- as.data.frame(GBC.pca.glasser$x[,1:10])
+GBC.pca.glasser.scores$subid <- participants$V1 
+GBC.pca.glasser.scores$sesid <- participants$V2
+GBC.pca.glasser.scores$drug <- participants$V3 
+GBC.pca.glasser.scores$meanFD <- participants$V4 #match subids to scores
+
+summary(glm(as.factor(GBC.pca.glasser.scores$drug) ~ GBC.pca.glasser.scores$PC1 + GBC.pca.glasser.scores$meanFD, family=binomial(logit)))
+```
+
+## SVM
+
+```{r}
+SVM_2class <- function(df,folds,feature_selection = F,feature_proportion = .1,num_repetitions = 100){
+  #SVM 2-class classifier
+  # folds: number of folds for cv.
+  # feature_selection: optional flag for data-driven feature selection. Selects the proportion of features indicated by feature_proportion. Not used by default.
+  # num_repetitions: How many times to you want to repeat the cv process using different random splits of the data. This is just extra caution against a randomly good or bad split.
+  
+  cat('\nRunning SVM models.....')
+  # Set up folds for CV
+  if (folds == "LOO") {
+    # This is for leave-one-out cross-validation
+    num_folds = length(unique(df$subid))
+    num_repetitions <- 1
+  } else {
+    num_folds = folds
+    num_repetitions <- num_repetitions
+  }
+
+  svm_output <- vector(mode = "list",length = num_repetitions) #set up output object.
+  
+  # Create the folds
+  unique_IDs <- unique(df$subid)
+  subid_folds <- replicate(num_repetitions,sample(unique_IDs,size = length(unique_IDs))) # create sets of random draws.
+  foldIdxs <- data.frame(subid=unique_IDs)
+  foldIdxs$foldID <- row_number(foldIdxs$subid)
+  foldIdxs$foldID <- ntile(foldIdxs$foldID,num_folds)
+  # cat('Sending data to CV')
+  for (r in 1:num_repetitions) {
+    foldIdxs$subid <- subid_folds[,r] # Grab a random split for folds.
+    fold_output<-vector(mode = "list",length = num_folds)
+    cat(sprintf('\nrepetition  %d.... ',r))
+    for (fold in 1:num_folds) {
+      # cat(sprintf('\nfold  %d.... ',fold))
+      trainingIDs <- as.matrix(foldIdxs %>% filter(foldID != fold) %>% select(subid))
+      trainingIndex <- df$subid %in% trainingIDs # indices for training subs
+      trainingData <- df[trainingIndex, 3:dim(df)[2] ] %>% arrange(drug) #this is important because libsvm automatically makes the first observation class 1, so drug must be first every time. Placebo will be class -1.
+      testData <- df[!trainingIndex, 4:dim(df)[2]] # test data. Take columns 4:end (Removes subid sesid drug).
+      testLabels <- data.frame(df[!trainingIndex,c(1:3) ])
+      # svm
+      x <- as.matrix(trainingData[, 2:dim(trainingData)[2]])
+      y <- as.factor(as.matrix(trainingData[,1]))
+      svm.model <- svm(x =x, y = y, cost = 1, kernel = "linear",type = "C-classification",scale = F)
+      svm.pred <- predict(svm.model, as.matrix(testData))
+      
+      w <- t(svm.model$coefs) %*% svm.model$SV #calculate feature weights.
+      # num_features <- dim(x)[2]
+      decisionValues <- w %*% t(testData)-svm.model$rho # Get decision valus.
+      distance <- decisionValues/norm(w) #calculate distance from the classification hyperplane
+      # just adding the results to the dataframe.
+      testLabels$decisionValues <- t(decisionValues)
+      testLabels$distance <- t(distance)
+      testLabels$model.pred = svm.pred
+      fold_output[[fold]]<-testLabels
+    }
+    svm_output[[r]] <- data.table::rbindlist(fold_output) # saving output for the repetition.
+    cat('complete\n')
+  }
+  # output_list <- apply(subid_folds,CV_function,df=df,num_folds = num_folds,MARGIN = 2)
+  
+  # Now train a model using all the data. This is for the estimation of the feature weights using the most possible data.
+  final_data<-df[, 3:dim(df)[2] ]
+  x <- as.matrix(final_data[, 2:dim(final_data)[2]])
+  y <- as.factor(as.matrix(final_data[,1]))
+  svm.model <- svm(x = x, y = y, 
+                   cost = 1, kernel = "linear",type = "C-classification",scale = F)
+  w <- t(svm.model$coefs) %*% svm.model$SV
+  svm_results <- list(svm_output,w,svm.model)
+  cat('\nFinished SVM models\n')
+  
+  return(svm_results)
+}
+```
+
+```{r}
+AUC <- function(DecisionValues, labels){
+  # This function creates an ROC curve and then calculates AUC.
+  # Decision values is nx1
+  # Labels is nx1
+  
+  # N.B.
+  # Drug (class 0) is assigned as +1 by libsvm and placebo (class 1) is assigned as 0 by libsvm default. 
+  # Adjust the true labels and predicted labels to match that here so that the decision values make sense.
+  labels <- labels*-1+1
+  
+  P <- sum(labels == 1)
+  N <- sum(labels == 0)
+  Sorted_DecisionValues <- sort(unique(DecisionValues), decreasing = FALSE)
+  numDecisionValues <- length(Sorted_DecisionValues)
+  
+  TP_Array <- vector(mode = "numeric",length = numDecisionValues)
+  FP_Array <- vector(mode = "numeric",length = numDecisionValues)
+  Accuracy_Array = vector(mode = "numeric",length = numDecisionValues)
+  for (i in 1:numDecisionValues){
+    thisCutoff <- Sorted_DecisionValues[i]
+    thisPredictedLabels <- as.numeric(DecisionValues>thisCutoff)
+    detections <- thisPredictedLabels==1
+    
+    TP <- sum(labels[detections] == thisPredictedLabels[detections])
+    TPR <- TP/P
+    FP <- sum(labels[detections]!=thisPredictedLabels[detections])
+    FPR <- FP/N
+    
+    TP_Array[i] <- TPR
+    FP_Array[i] <- FPR
+    
+    Accuracy_Array[i] = (TP + N - FP) / (P + N)
+  }
+  
+  ROC_output <- data.frame(TPR =TP_Array,FPR=FP_Array,Accuracy = Accuracy_Array)
+  ROC_output <- ROC_output%>%arrange(TPR,FPR)
+  
+  #AUC
+  dFPR <- c(0,diff(ROC_output$FPR))
+  dTPR <- c(0,diff(ROC_output$TPR))
+  AUC <- sum(ROC_output$TPR * dFPR) + sum(dTPR * dFPR)/2
+  return(AUC)
+}
+```
+
+### Schaefer
+
+```{r}
+regionheaders <- schaefer.parcel.labels$label
+demoheaders <- c("subid","sesid","drug","meanFD")
+colheaders <- as.matrix(c(demoheaders,regionheaders))
+
+df <- GBC.schaefer
+colnames(df) <- colheaders
+df <- df %>% select(-meanFD)
+df <- df[, unlist(lapply(df, function(x) !all(is.na(x))))]
+```
+
+```{r, echo=T, eval=F}
+model_results <- SVM_2class(df, "LOO")
+saveRDS(model_results, file="/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/GBC/GBC.SVM.modelresults.schaefer.rds")
+```
+```{r}
+model_results <- readRDS("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/GBC/GBC.SVM.modelresults.schaefer.rds")
+prediction_output <- model_results[[1]]
+```
+
+```{r}
+W<-model_results[[2]]
+svm.model <- model_results[[3]]
+num_features <- sum(!is.na(W[1,]))
+```
+
+#### Model accuracy
+```{r}
+accuracy_fun <- function(x) sum(x$model.pred==x$drug)/dim(x)[1] 
+accuracies <- sapply(prediction_output,accuracy_fun) 
+accuracy <- mean(accuracies)
+accuracy
+```
+
+#### Number of correct classifications 
+
+```{r}
+num_obs <- length(prediction_output[[1]]$model.pred)
+num_correct <- round(accuracy*num_obs)
+num_correct
+```
+
+#### Permutation-based significance
+
+```{r, echo=F,  eval = F, results='hide'}
+num_permutations = 1000
+nw=1
+folds="LOO"
+
+b <- binom.test(num_correct,num_obs,.5) #This is a binomial test. The p-value is not used (permutation test is used instead), but this function summarizes the data nicely.
+b
+b$pred_data <- prediction_output
+b$accuracy <- accuracy
+
+perm_acc <- matrix(nrow = num_permutations)
+perm_W <- matrix(nrow = num_permutations,ncol = num_features)
+perm_list <- list()
+
+perm_list = foreach(perm_chunk = idiv(num_permutations,chunks = nw),
+                        .combine=c,
+                        .export = c("featureExtraction","SVM_2class"),
+                        .packages = c("dplyr","e1071","matrixTests")) %do% {  # This must be `dopar` to be parallel.
+                          perm_result_list=list()
+                          for (p in 1:perm_chunk){
+                            # thisPerm <- perms[p,]
+                            cat(sprintf("\nPermutation %d",p))
+                            thisDF <- df
+                            # thisDF$drug <- df$drug[thisPerm]
+                            permuted <- df %>% select(subid,drug) %>% group_by(subid) %>% mutate(perm_drug=sample(drug))
+                            thisDF$drug <- permuted$perm_drug
+                            perm_pred_result <- SVM_2class(thisDF,folds,
+                                                           feature_selection = feature_selection,
+                                                           feature_proportion = feature_proportion,
+                                                           num_repetitions = 1)
+                        
+                            perm_result_list[[p]] = list(perm_pred_result)
+                          }
+                          perm_result_list
+                        }
+
+  #organizing the output
+pred_data_list <- lapply(perm_list, function(x) x[[1]][[1]])
+perm_Ws <- lapply(perm_list,function(x) x[[1]][[2]])
+```
+
+
+```{r, echo=T, eval=F}
+# Calculating permutation accuracies and AUCs
+perm_acc_distribution <- sapply(pred_data_list, function(x) sum(x[[1]]$model.pred==x[[1]]$drug)/length(x[[1]]$drug))
+
+perm_p <- sum(perm_acc_distribution>accuracy)/length(perm_acc_distribution)
+
+perm_auc_distribution <- sapply(pred_data_list, function(x) AUC(DecisionValues=x[[1]]$decisionValues,labels=x[[1]]$drug))
+    
+    
+W_test <- sapply(perm_Ws, FUN = function(x) {
+    abs(x)>abs(W)
+    })
+W_sig <- rowMeans(W_test)
+    
+b$perm_p <- perm_p
+b$perm_W_sig <- W_sig
+b$perm_accs = perm_acc_distribution
+b$perm_aucs = perm_auc_distribution
+
+  
+saveRDS(b, file="/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/GBC/GBC.SVM.permutationresults.schaefer.rds")
+```
+
+```{r}
+b <- readRDS("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/GBC/GBC.SVM.permutationresults.schaefer.rds")
+```
+
+```{r echo=FALSE}
+cat(sprintf("The permuted accuracy is greater than the actual accuracy %s time", sum(b$perm_accs>accuracy)))
+
+print(sprintf("Overall Accuracy: %1.3f; p = %.5f\n\n",accuracy,b$perm_p))
+```
+
+```{r echo=FALSE}
+hist(b$perm_accs, col="#781d75", xlim = c(0.3, 0.7), main="", xlab="Accuracy")
+abline(v = accuracy, col="#ffd000", lwd=4, lty=1)
+```
+
+#### Model weights map
+
+```{r, warning=F, echo=F, comment=F, message=F}
+SVM.weights.schaefer <- as.data.frame(t(W))
+SVM.weights.schaefer$label <- row.names(SVM.weights.schaefer)
+
+ggseg(.data = SVM.weights.schaefer, atlas = "schaefer17_400",  mapping=aes(fill=V1), position = c("stacked")) + theme_void() + scale_fill_gradient2(high= "goldenrod1", mid = "white", low = "#6f1282", guide = "colourbar", aesthetics = "fill", name = NULL)
+```
+
+### Model weights S-A axis correlation
+
+```{r echo=FALSE}
+SAaxis.schaefer$label <- schaefer.parcel.labels$label
+SVM.weights.schaefer.SA <- merge(SVM.weights.schaefer, SAaxis.schaefer, by="label")
+cor.test(SVM.weights.schaefer.SA$V1, SVM.weights.schaefer.SA$finalrank.wholebrain, method=c("spearman"), exact=F)
+```
+
+### Model weights Inhibition correlation
+
+```{r echo=FALSE}
+mappys$label <- schaefer.parcel.labels$label
+SVM.weights.schaefer.mappys <- merge(SVM.weights.schaefer, mappys, by="label")
+cor.test(SVM.weights.schaefer.mappys$V1, SVM.weights.schaefer.mappys$PVALB, method=c("spearman"), exact=F)
+```
+
+
+### Glasser
+
+```{r}
+regionheaders <- glasser.parcel.labels$label
+demoheaders <- c("subid","sesid","drug","meanFD")
+colheaders <- as.matrix(c(demoheaders,regionheaders))
+
+df <- GBC.glasser
+colnames(df) <- colheaders
+df <- df %>% select(-meanFD)
+df <- df[, unlist(lapply(df, function(x) !all(is.na(x))))]
+```
+
+```{r, echo=T, eval=F}
+model_results <- SVM_2class(df, "LOO")
+saveRDS(model_results, file="/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/GBC/GBC.SVM.modelresults.glasser.rds")
+```
+```{r}
+model_results <- readRDS("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/GBC/GBC.SVM.modelresults.glasser.rds")
+prediction_output <- model_results[[1]]
+```
+
+```{r}
+W<-model_results[[2]]
+svm.model <- model_results[[3]]
+num_features <- sum(!is.na(W[1,]))
+```
+
+#### Model accuracy
+```{r}
+accuracy_fun <- function(x) sum(x$model.pred==x$drug)/dim(x)[1] 
+accuracies <- sapply(prediction_output,accuracy_fun) 
+accuracy <- mean(accuracies)
+accuracy
+```
+
+#### Number of correct classifications 
+
+```{r}
+num_obs <- length(prediction_output[[1]]$model.pred)
+num_correct <- round(accuracy*num_obs)
+num_correct
+```
+
+#### Permutation-based significance
+
+```{r, echo=T,  eval = F, results='hide'}
+num_permutations = 1000
+nw=1
+folds="LOO"
+
+b <- binom.test(num_correct,num_obs,.5) #This is a binomial test. The p-value is not used (permutation test is used instead), but this function summarizes the data nicely.
+b
+b$pred_data <- prediction_output
+b$accuracy <- accuracy
+
+perm_acc <- matrix(nrow = num_permutations)
+perm_W <- matrix(nrow = num_permutations,ncol = num_features)
+perm_list <- list()
+
+perm_list = foreach(perm_chunk = idiv(num_permutations,chunks = nw),
+                        .combine=c,
+                        .export = c("featureExtraction","SVM_2class"),
+                        .packages = c("dplyr","e1071","matrixTests")) %do% {  # This must be `dopar` to be parallel.
+                          perm_result_list=list()
+                          for (p in 1:perm_chunk){
+                            # thisPerm <- perms[p,]
+                            cat(sprintf("\nPermutation %d",p))
+                            thisDF <- df
+                            # thisDF$drug <- df$drug[thisPerm]
+                            permuted <- df %>% select(subid,drug) %>% group_by(subid) %>% mutate(perm_drug=sample(drug))
+                            thisDF$drug <- permuted$perm_drug
+                            perm_pred_result <- SVM_2class(thisDF,folds,
+                                                           feature_selection = feature_selection,
+                                                           feature_proportion = feature_proportion,
+                                                           num_repetitions = 1)
+                        
+                            perm_result_list[[p]] = list(perm_pred_result)
+                          }
+                          perm_result_list
+                        }
+
+  #organizing the output
+pred_data_list <- lapply(perm_list, function(x) x[[1]][[1]])
+perm_Ws <- lapply(perm_list,function(x) x[[1]][[2]])
+```
+
+
+```{r, echo=T, eval=F}
+# Calculating permutation accuracies and AUCs
+perm_acc_distribution <- sapply(pred_data_list, function(x) sum(x[[1]]$model.pred==x[[1]]$drug)/length(x[[1]]$drug))
+
+perm_p <- sum(perm_acc_distribution>accuracy)/length(perm_acc_distribution)
+
+perm_auc_distribution <- sapply(pred_data_list, function(x) AUC(DecisionValues=x[[1]]$decisionValues,labels=x[[1]]$drug))
+    
+    
+W_test <- sapply(perm_Ws, FUN = function(x) {
+    abs(x)>abs(W)
+    })
+W_sig <- rowMeans(W_test)
+    
+b$perm_p <- perm_p
+b$perm_W_sig <- W_sig
+b$perm_accs = perm_acc_distribution
+b$perm_aucs = perm_auc_distribution
+
+  
+saveRDS(b, file="/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/GBC/GBC.SVM.permutationresults.glasser.rds")
+```
+
+```{r}
+b <- readRDS("/cbica/projects/spatiotemp_dev_plasticity/Inhibition/Alpraz/GBC/GBC.SVM.permutationresults.glasser.rds")
+```
+
+```{r echo=FALSE}
+cat(sprintf("The permuted accuracy is greater than the actual accuracy %s time", sum(b$perm_accs>accuracy)))
+
+print(sprintf("Overall Accuracy: %1.3f; p = %.5f\n\n",accuracy,b$perm_p))
+```
+
+```{r echo=FALSE}
+hist(b$perm_accs, col="#781d75", xlim = c(0.3, 0.7), main="", xlab="Accuracy")
+abline(v = accuracy, col="#ffd000", lwd=4, lty=1)
+```
+
+#### Model weights map
+
+```{r, warning=F, echo=F, comment=F, message=F}
+SVM.weights.glasser <- as.data.frame(t(W))
+SVM.weights.glasser$label <- row.names(SVM.weights.glasser)
+
+ggseg(.data = SVM.weights.glasser, atlas = "glasser",  mapping=aes(fill=V1), position = c("stacked")) + theme_void() + scale_fill_gradient2(high= "goldenrod1", mid = "white", low = "#6f1282", guide = "colourbar", aesthetics = "fill", name = NULL)
+```
+
+### Model weights S-A axis correlation
+
+```{r echo=FALSE}
+SAaxis.glasser$label <- glasser.parcel.labels$label[181:360]
+SVM.weights.glasser.SA <- merge(SVM.weights.glasser, SAaxis.glasser, by="label")
+cor.test(SVM.weights.glasser.SA$V1, SVM.weights.glasser.SA$final.rank, method=c("spearman"), exact=F)
+```
